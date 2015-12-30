@@ -1,0 +1,202 @@
+#!/usr/bin/python
+#
+#  logwatcher: watch log files -- use at your own peril (work in progress)
+#  logwatcher (c) vamegh hedayati 2015
+#   GNU/GPL v3 please see the License file for terms and conditions
+
+import datetime
+import errno
+import glob
+import os
+import re
+import sys
+import threading
+import time
+import yaml
+from optparse import OptionParser
+#from DaemonLite import DaemonLite
+
+__version__ = '0.0.1'
+
+parser = OptionParser(version='logwatcher v%s' % __version__,
+    usage='\n'.join([
+        'logwatcher [options]\n',
+        '\n* logwatcher must be run as root *\n',
+        'log condition checks are read in from a yaml config default is /etc/logwatcher.yaml',
+        'the all or name options should be specified to run the checks',
+        'the name option can be repeated several times to run specific checks',
+        'the show option will display all available log check names that can be run.'
+    ]))
+parser.add_option('-a', '--all', action='store_true',
+    help='all of the available log conditions in the config file will be checked - either this or the name option must be specified')
+parser.add_option('-c', '--config', action='store', default="logwatcher.yaml",
+    help='Provide a custom configuration file, defaults to logwatcher.yaml if none provided')
+parser.add_option('-d', '--directory', action="store",
+    help='Set the log directory to scan log files from - default read from config file. This overrides the config file')
+parser.add_option('-l', '--logfile', action="store",
+    help='Set the log file location to store the output of this script, (full path required).  This overrides the config file')
+parser.add_option('-n', '--name', action='append',
+    help='The name of a specific log condition to check for as contained within the config file (repeatable) either this or the all option must be specified')
+#parser.add_option('-p', '--pid', action='store', default="/var/run/logwatcher.pid",
+#    help='tell the script where to create the pid file, defaults to /var/run/logwatcher.pid'
+parser.add_option('-s', '--show', action="store_true",
+    help='Display all of the available log conditions that are being monitoreds as contained within the config')
+
+class ThreadArgs(threading.Thread):
+
+    def __init__( self, group=None, target=None, name=None, verbose=None,
+                args=(), kwargs=None, logchecks={}, file_read=None, file_write=None):
+      threading.Thread.__init__(self, group=group, target=target, name=name, verbose=verbose)
+      self.args = args
+      self.kwargs = kwargs
+      self.logchecks = logchecks
+      self.file_read = file_read
+      self.file_write = file_write
+      return
+
+    #def run(self):
+    #  return
+
+## check the config file (raw) do some basic command line processing,
+## to see if all or just some of the check conditions should be processed
+def check_cmd(**rawlogs):
+  log_checks = {}
+  log_checks["log_checks"] = {}
+
+  if options.show:
+    for log_names in list(rawlogs["log_checks"].keys()):
+      print log_names
+    sys.exit(0)
+
+  if options.all:
+    log_checks = rawlogs
+  elif options.name:
+    for name in (options.name):
+      if name in list(rawlogs["log_checks"].keys()):
+        log_checks['log_checks'][name] = rawlogs['log_checks'][name]
+  else:
+    parser.print_help()
+    sys.exit(1)
+
+  return log_checks["log_checks"]
+
+## parse the config file, add in none defaults if nothing has been set for the logcheck hash / dict
+def scan_yaml(**logcheck):
+  log_checks_sanitized = {}
+
+  for key in logcheck:
+    try:
+      name = logcheck[key]["name"]
+    except KeyError as e:
+      new_key = e.args[0]
+      logcheck[key][new_key] = "none"
+    try:
+      condition = logcheck[key]["conditon"]
+    except KeyError as e:
+      new_key = e.args[0]
+      logcheck[key][new_key] = "none"
+    try:
+      message = logcheck[key]["message"]
+    except KeyError as e:
+      new_key = e.args[0]
+      logcheck[key][new_key] = "none"
+
+  return log_check_sanitized
+
+
+## scan the files as they are pumped through -- this is split into a seperate thread and runs indefinitely.
+def scan_file(logchecks={}, file_read=None, file_write=None):
+  #names = []
+  #conditions = []
+  #messages = []
+  #names.append(name)
+  #conditions.append(condition)
+  #messages.append(message)
+  ## modified from http://www.dabeaz.com/generators/Generators.pdf
+    while True:
+      try:
+        with open(file_read) as f:
+          f.seek(0,2)
+          line = f.readline()
+          ## get all of the values from the dict and stick them into related arrays
+          for key in logchecks:
+            name = logchecks[key]["name"]
+            condition = logchecks[key]["condition"]
+            message = logchecks[key]["message"]
+            if re.match("(.*)condition(.*)", line):
+              if messsage == "print":
+                try:
+                  with open(file_write, "w"):
+                    print >> file_write, line,
+                except IOError as (errno, strerror):
+                  print "I/O error({0}): {1}".format(errno, strerror)
+                  sys.exit (1)
+              else:
+                try:
+                  with open(file_write, "w"):
+                    print >> file_write, message,
+                except IOError as (errno, strerror):
+                  print "I/O error({0}): {1}".format(errno, strerror)
+                  sys.exit (1)
+      except IOError as e:
+        if e.errno != errno.EISDIR:
+          raise
+
+def handle_logchecks(logchecks={}, logdir=None, logfile=None):
+  ## disabled turning this to daemon for now - since its changed to using threading.
+  #class LogWatcher(DaemonLite) :
+  #  def run(self) :
+  #logwatch = LogWatcher('/var/staff/staff.pid')
+  #logwatch.start()
+  log_files_scan = glob.glob(logdir)
+  for log_scan in log_files:
+    ## thread it off as described here: https://pymotw.com/2/threading/index.html#module-threading
+    t = ThreadArgs(name=log_scan, target=scan_file, logchecks=logchecks, file_read=log_scan, file_write=logfile)
+    t.setDaemon(True)
+    t.start
+
+  main_thread = threading.currentThread()
+  for t in threading.enumerate():
+    if t is main_thread:
+        continue
+    t.join()
+
+if os.geteuid() != 0:
+  print "Please run logwatcher as root\n"
+  sys.exit (1)
+
+## from stackoverflow (http://stackoverflow.com/questions/380870/python-single-instance-of-program/1265445#1265445)
+### Linux specific
+try:
+  import socket
+  s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+  ## Create an abstract socket, by prefixing it with null.
+  s.bind( '\0postconnect_gateway_notify_lock')
+except socket.error, e:
+  error_code = e.args[0]
+  error_string = e.args[1]
+  print "logwatcher is already running (%d:%s ). Please wait for the current running process to finish before running again." % ( error_code, error_string)
+  sys.exit (1)
+
+options, args = parser.parse_args()
+
+with open(options.config, "r") as logyml:
+  logcfg = yaml.safe_load(logyml)
+
+## Set the base log directory to scan from the command line (-d / --directory) if provided,
+## else get from yaml configuration file.
+if options.directory:
+  logdir = options.directory
+else:
+  logdir = logcfg['log_check_path']
+
+## set the log file to log occurances of the specified conditions which have matched.
+if options.logfile:
+  logfile = options.logfile
+else:
+  logfile = logcfg['log_file']
+
+log_check = check_cmd(**logcfg)
+log_check_sanitized = scan_yaml(**log_check)
+handle_logchecks(logchecks=log_check_sanitized, logdir=logdir, logfile=logfile)
+

@@ -1,0 +1,20 @@
+---
+
+log_check_path: "/tmp/log"
+log_file: "/tmp/logwatch.log"
+
+## some example repos have been provided below -- they should all work.
+log_checks:
+  error_print:
+    name: "error"
+    condition: "ERROR"
+    message: "print"
+  exception_print:
+    name: "exception"
+    condition: "Exception:"
+    message: "print"
+  service_start:
+    name: "service_start"
+    condition: "INFO: Server startup in:"
+    message: "TOMCAT HAS STARTED"
+

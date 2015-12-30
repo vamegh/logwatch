@@ -1,0 +1,6 @@
+
+
+Stuff we need to do:
+
+1. read in all files from a specific path
+2. check for specific conditions and if they are true then provide suitable logging conditions for them.
