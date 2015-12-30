@@ -1,7 +1,7 @@
 ---
 
-log_check_path: "/tmp/log"
-log_file: "/tmp/logwatch.log"
+log_check_path: "/tmp/tomcat-logs"
+log_file: "/tmp/errchecker-log.txt"
 
 ## some example repos have been provided below -- they should all work.
 log_checks:

@@ -15,7 +15,6 @@ You will need pip installed before attempting this, on Debian / Ubuntu the follo
 sudo apt-get install python-pip
 ```
 
-
 Quite convuloted, will need to revisit this, this is not production ready code, just a proof of concept. Feel free to use and modify as you please, copyright gnu/gplv3
 
 
