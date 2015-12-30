@@ -9,14 +9,15 @@ import errno
 import glob
 import os
 import re
+import signal
 import sys
 import threading
 import time
 import yaml
 from optparse import OptionParser
-#from DaemonLite import DaemonLite
+from DaemonLite import DaemonLite
 
-__version__ = '0.0.1'
+__version__ = '0.0.2'
 
 parser = OptionParser(version='logwatcher v%s' % __version__,
     usage='\n'.join([
@@ -42,20 +43,20 @@ parser.add_option('-n', '--name', action='append',
 parser.add_option('-s', '--show', action="store_true",
     help='Display all of the available log conditions that are being monitoreds as contained within the config')
 
-class ThreadArgs(threading.Thread):
-
-    def __init__( self, group=None, target=None, name=None, verbose=None,
-                args=(), kwargs=None, logchecks={}, file_read=None, file_write=None):
-      threading.Thread.__init__(self, group=group, target=target, name=name, verbose=verbose)
-      self.args = args
-      self.kwargs = kwargs
-      self.logchecks = logchecks
-      self.file_read = file_read
-      self.file_write = file_write
-      return
-
-    #def run(self):
-    #  return
+#class ThreadArgs(threading.Thread):
+#  def __init__( self, group=None, target=None, name=None, verbose=None,
+#              args=(), kwargs=None, logchecks={}, file_read=None, file_write=None):
+#    threading.Thread.__init__(self, group=group, target=target, name=name, verbose=verbose)
+#    self.args = args
+#    self.kwargs = kwargs
+#    self.logchecks = logchecks
+#    self.file_read = file_read
+#    self.file_write = file_write
+#    return
+#
+#  def run(self):
+#    print ("logchecks :: %s, \nfile_read ::%s, \nfile_write :: %s\n" %(self.logchecks, self.file_read, self.file_write))
+#    return
 
 ## check the config file (raw) do some basic command line processing,
 ## to see if all or just some of the check conditions should be processed
@@ -82,8 +83,6 @@ def check_cmd(**rawlogs):
 
 ## parse the config file, add in none defaults if nothing has been set for the logcheck hash / dict
 def scan_yaml(**logcheck):
-  log_checks_sanitized = {}
-
   for key in logcheck:
     try:
       name = logcheck[key]["name"]
@@ -91,7 +90,7 @@ def scan_yaml(**logcheck):
       new_key = e.args[0]
       logcheck[key][new_key] = "none"
     try:
-      condition = logcheck[key]["conditon"]
+      condition = logcheck[key]["condition"]
     except KeyError as e:
       new_key = e.args[0]
       logcheck[key][new_key] = "none"
@@ -101,66 +100,79 @@ def scan_yaml(**logcheck):
       new_key = e.args[0]
       logcheck[key][new_key] = "none"
 
-  return log_check_sanitized
+  return logcheck
 
+def check_status(flag):
+  if (flag == "set"):
+    print "Detected a manual attempt to kill, killing now"
+    sys.exit(1)
 
 ## scan the files as they are pumped through -- this is split into a seperate thread and runs indefinitely.
-def scan_file(logchecks={}, file_read=None, file_write=None):
-  #names = []
-  #conditions = []
-  #messages = []
-  #names.append(name)
-  #conditions.append(condition)
-  #messages.append(message)
+def scan_file(**kwargs):
+  if kwargs is not None:
+    logchecks = kwargs['logchecks']
+    file_read = kwargs['file_read']
+    file_write = kwargs['file_write']
+  else:
+    print "Nothing passed to scan_file, bombing out..."
+    sys.exit(1)
+
+  print " Reading  file ", file_read
+
   ## modified from http://www.dabeaz.com/generators/Generators.pdf
+  try:
+    f = open(file_read, 'r')
+    f.seek(0,2)
     while True:
-      try:
-        with open(file_read) as f:
-          f.seek(0,2)
-          line = f.readline()
-          ## get all of the values from the dict and stick them into related arrays
-          for key in logchecks:
-            name = logchecks[key]["name"]
-            condition = logchecks[key]["condition"]
-            message = logchecks[key]["message"]
-            if re.match("(.*)condition(.*)", line):
-              if messsage == "print":
-                try:
-                  with open(file_write, "w"):
-                    print >> file_write, line,
-                except IOError as (errno, strerror):
-                  print "I/O error({0}): {1}".format(errno, strerror)
-                  sys.exit (1)
-              else:
-                try:
-                  with open(file_write, "w"):
-                    print >> file_write, message,
-                except IOError as (errno, strerror):
-                  print "I/O error({0}): {1}".format(errno, strerror)
-                  sys.exit (1)
-      except IOError as e:
-        if e.errno != errno.EISDIR:
-          raise
+      line = f.readline()
+      #if not line:
+        #time.sleep(0.1)
+      if line:
+        for key in logchecks:
+          name = logchecks[key]["name"]
+          condition = logchecks[key]["condition"]
+          message = logchecks[key]["message"]
+          pattern = ".*" + re.escape(condition) + ".*"
+          if re.match(pattern, line):
+            if message == "print":
+              try:
+                with open(file_write, "a") as w:
+                  w.write(line)
+              except IOError as (errno, strerror):
+                print "I/O error({0}): {1}".format(errno, strerror)
+                sys.exit (1)
+            else:
+              try:
+                with open(file_write, "a") as w:
+                  w.write(message+"\n")
+              except IOError as (errno, strerror):
+                print "I/O error({0}): {1}".format(errno, strerror)
+                sys.exit (1)
+  except IOError as e:
+    if e.errno != errno.EISDIR:
+      raise
 
 def handle_logchecks(logchecks={}, logdir=None, logfile=None):
-  ## disabled turning this to daemon for now - since its changed to using threading.
-  #class LogWatcher(DaemonLite) :
-  #  def run(self) :
-  #logwatch = LogWatcher('/var/staff/staff.pid')
-  #logwatch.start()
-  log_files_scan = glob.glob(logdir)
-  for log_scan in log_files:
-    ## thread it off as described here: https://pymotw.com/2/threading/index.html#module-threading
-    t = ThreadArgs(name=log_scan, target=scan_file, logchecks=logchecks, file_read=log_scan, file_write=logfile)
-    t.setDaemon(True)
-    t.start
+  ## turning this into a daemon ... and using threads.
+  class LogWatcher(DaemonLite) :
+    def run(self) :
+      while (True):
+        log_files_scan = glob.glob(logdir)
+        for log_scan in log_files_scan:
+          ## thread it off as described here: https://pymotw.com/2/threading/index.html#module-threading
+          t = threading.Thread(name=log_scan, target=scan_file, kwargs={'logchecks':logchecks, 'file_read':log_scan, 'file_write':logfile})
+          t.setDaemon(True)
+          t.start()
 
-  main_thread = threading.currentThread()
-  for t in threading.enumerate():
-    if t is main_thread:
-        continue
-    t.join()
+        main_thread = threading.currentThread()
+        for t in threading.enumerate():
+          if t is main_thread:
+            continue
+          t.join(5)
+        #time.sleep(3)
 
+  logwatch = LogWatcher('/var/run/logwatcher.pid')
+  logwatch.run()
 if os.geteuid() != 0:
   print "Please run logwatcher as root\n"
   sys.exit (1)
@@ -190,6 +202,8 @@ if options.directory:
 else:
   logdir = logcfg['log_check_path']
 
+logdir  = logdir + "/*"
+
 ## set the log file to log occurances of the specified conditions which have matched.
 if options.logfile:
   logfile = options.logfile
@@ -197,6 +211,8 @@ else:
   logfile = logcfg['log_file']
 
 log_check = check_cmd(**logcfg)
-log_check_sanitized = scan_yaml(**log_check)
-handle_logchecks(logchecks=log_check_sanitized, logdir=logdir, logfile=logfile)
+log_checked = scan_yaml(**log_check)
+handle_logchecks(logchecks=log_checked, logdir=logdir, logfile=logfile)
 
+#signal.signal(signal.SIGINT,check_status("set"))
+#signal.signal(signal.SIGTERM,check_status("set"))
