@@ -172,7 +172,7 @@ def handle_logchecks(logchecks={}, logdir=None, logfile=None):
         #time.sleep(3)
 
   logwatch = LogWatcher('/var/run/logwatcher.pid')
-  logwatch.run()
+  logwatch.start()
 if os.geteuid() != 0:
   print "Please run logwatcher as root\n"
   sys.exit (1)

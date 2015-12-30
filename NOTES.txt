@@ -1,6 +1,29 @@
 
 
-Stuff we need to do:
+Stuff that needs to be done:
 
 1. read in all files from a specific path
 2. check for specific conditions and if they are true then provide suitable logging conditions for them.
+
+
+There are many approaches to this,
+
+we could track all files from a set period by checking mtime, anything updated within the last minute gets scanned,
+or alternately we can try and do an equivalent of a tail -f on the file and as the required expression comes through grab it and work on it.
+
+To make life simple and this script more flexible the configuration is stored in a yaml file, the hash is then read in and converted to a dict in python and we get our condition and message from here.
+
+
+The script has turned out a lot more convulated then originally anticipated but thats because we have no set target so have to aim blindly at a path, which causes extra looping, but its good in that this could be pointed to /var/log and that can just be tracked for errors that pop up.
+
+
+Basic concept is this:
+
+
+Read all files in a given directory and constantly monitor that directory for new files --> pass this off to a file scanner to read in the files as they come in and to read the last line of the file (I am having some problems with doing a tail due to the fact that it needs to seek to the bottom of the file and then track that location, while trying to track new files).
+
+Each time a file is scanned its forked off using the threads library so that its processed seperately and so that we can have multiple files open at the same time, any time any of the conditions are matched as set in the logwatch.yaml then this should trigger a write to the log file for logwatcher.
+
+Each thread is daemonized and the main process itself is also daemonized, each thread in turn has 5 seconds to do its scans (it needs time to actually track the end of the file - its a poor mans find) then the threads are forcibly joined back to the main process where the whole folder structure is re-scanned again for new files which again kicks off the file scan process and the threads to scan the various files, during this time there are black outs. There has to be a better way of tracking changes to the end of the file, which I havent found yet (ive only spent around a day knocking this up), but if the end of the file can easily be tracked this script should just work even if pointed directly to /var/log and given any error condition or error message to track and display.
+
+
